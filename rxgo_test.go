@@ -26,3 +26,17 @@ func TestMain(t *testing.T) {
 }
 
 func dd(x int) int { return 2 * x }
+
+type observer struct{}
+
+func (o observer) OnNext(x interface{}) {
+	fmt.Println("observer", x)
+}
+
+func (o observer) OnError(e error) {}
+func (o observer) OnCompleted()    {}
+
+func TestObserver(t *testing.T) {
+	var s rxgo.Observer = observer{}
+	rxgo.Just(1, 2, 3).Subscribe(s, nil, nil)
+}

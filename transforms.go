@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// Map maps a MappableFunc `func(x anytype) anytype` predicate to each item in Observable and
+// Map maps each item in Observable by the function with `func(x anytype) anytype` and
 // returns a new Observable with applied items.
 func (parent *Observable) Map(f interface{}) (o *Observable) {
 	// check validation of f
@@ -23,6 +23,24 @@ func (parent *Observable) Map(f interface{}) (o *Observable) {
 	}
 
 	o = parent.newTransformObservable("map")
+	o.flip = fv.Interface()
+	o.operator = mapflow
+	return o
+}
+
+// FlatMap maps each item in Observable by the function with `func(x anytype) (o *Observable) ` and
+// returns a new Observable with merged observables appling on each items.
+func (parent *Observable) FlatMap(f interface{}) (o *Observable) {
+	// check validation of f
+	fv, ft := reflect.ValueOf(f), reflect.TypeOf(f)
+	if fv.Kind() != reflect.Func {
+		panic(ErrFuncFlip)
+	}
+	if ft.NumIn() != 1 && ft.NumOut() != 1 && ft.Out(0) != reflect.TypeOf(o) {
+		panic(ErrFuncFlip)
+	}
+
+	o = parent.newTransformObservable("flatMap")
 	o.flip = fv.Interface()
 	o.operator = mapflow
 	return o
@@ -112,7 +130,7 @@ func (parent *Observable) newTransformObservable(name string) (o *Observable) {
 	o.pred = parent
 	o.root = parent.root
 
-	//set operators
-	o.outflow = make(chan interface{}, BufferLen)
+	//set options
+	o.buf_len = BufferLen
 	return o
 }

@@ -7,6 +7,7 @@ package rxgo
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 )
 
@@ -19,20 +20,29 @@ const (
 var ErrFuncOnNext = errors.New("Func Error onNext(x)")
 var ErrFuncFlip = errors.New("Flip Func Error")
 
-var BufferLen = 128
+var BufferLen uint = 128
+
+type Observer interface {
+	OnNext(x interface{})
+	OnError(error)
+	OnCompleted()
+}
 
 type Observable struct {
-	name      string
-	flip      interface{} // transformation function
-	outflow   chan interface{}
-	operator  func(o *Observable)
-	root      *Observable
-	next      *Observable
-	pred      *Observable
-	threading int //threading model
-	buf_len   int
+	name     string
+	flip     interface{} // transformation function
+	outflow  chan interface{}
+	operator func(o *Observable)
+	// chain of Observables
+	root *Observable
+	next *Observable
+	pred *Observable
+	// control model
+	threading int //threading model. if this is root, it represents obseverOn model
+	buf_len   uint
 	connected bool
-	debug     bool
+	// utility vars
+	debug bool
 }
 
 func newObservable() *Observable {
@@ -49,6 +59,7 @@ func (o *Observable) connect() {
 // connect one Observable
 func (o *Observable) Hot() *Observable {
 	if !o.connected {
+		o.outflow = make(chan interface{}, o.buf_len)
 		o.operator(o)
 	}
 	return o
@@ -63,8 +74,18 @@ func (o *Observable) SubscribeOn(t int) *Observable {
 
 func (o *Observable) Subscribe(onNext interface{}, onError func(error), onCompleted func()) {
 	fv := reflect.ValueOf(onNext)
+	var observer Observer
 	if fv.Kind() != reflect.Func {
-		panic(ErrFuncOnNext)
+		// Implements 不能直接使用类型作为参数，导致这种用法非常别扭
+		fmt.Printf("onNext v %v t %T \n", onNext, onNext)
+		st := reflect.TypeOf((*Observer)(nil)).Elem()
+		ft := reflect.TypeOf(onNext)
+		fmt.Println("ffffffffffffff", ft, st, ft.Implements(st))
+		if ft.Implements(st) {
+			observer = onNext.(Observer)
+		} else {
+			panic(ErrFuncOnNext)
+		}
 	}
 
 	o.connect()
@@ -73,10 +94,18 @@ func (o *Observable) Subscribe(onNext interface{}, onError func(error), onComple
 	for ; po.next != nil; po = po.next {
 	}
 	for x := range po.outflow {
-		params := make([]reflect.Value, 1)
-		params[0] = reflect.ValueOf(x)
-		fv.Call(params)
+		if observer != nil {
+			observer.OnNext(x)
+		} else {
+			params := []reflect.Value{reflect.ValueOf(x)}
+			fv.Call(params)
+		}
 	}
+}
+
+func (o *Observable) SetBufferLen(length uint) *Observable {
+	o.buf_len = length
+	return o
 }
 
 func (o *Observable) Debug(flag bool) *Observable {

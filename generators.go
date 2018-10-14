@@ -48,21 +48,17 @@ func Generator(f interface{}) *Observable {
 		panic(ErrFuncFlip)
 	}
 
-	o := newObservable()
-	o.name = "Custom Generator"
-	o.outflow = make(chan interface{})
+	o := newGeneratorObservable("Custom Generator")
+
 	o.flip = fv.Interface()
 	o.operator = generatorCustomFunc
-	o.root = o
 	return o
 }
 
 // Range creates an Observable that emits a particular range of sequential integers.
 func Range(start, end int) *Observable {
-	o := newObservable()
-	o.name = "Range"
+	o := newGeneratorObservable("Range")
 
-	o.outflow = make(chan interface{})
 	o.flip = func() {
 		i := start
 		for i < end {
@@ -71,18 +67,13 @@ func Range(start, end int) *Observable {
 		}
 		close(o.outflow)
 	}
-
 	o.operator = generator
-	o.root = o
 	return o
 }
 
 // Just creates an Observable with the provided item(s).
 func Just(items ...interface{}) *Observable {
-	o := newObservable()
-	o.name = "Just"
-
-	o.outflow = make(chan interface{})
+	o := newGeneratorObservable("Just")
 
 	o.flip = func() {
 		for _, item := range items {
@@ -90,8 +81,19 @@ func Just(items ...interface{}) *Observable {
 		}
 		close(o.outflow)
 	}
-
 	o.operator = generator
+	return o
+}
+
+func newGeneratorObservable(name string) (o *Observable) {
+	//new Observable
+	o = newObservable()
+	o.name = name
+
+	//chain Observables
 	o.root = o
+
+	//set options
+	o.buf_len = 0
 	return o
 }

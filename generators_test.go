@@ -51,3 +51,40 @@ func TestJust(t *testing.T) {
 			i = i + 10
 		}, nil, nil)
 }
+
+func TestFrom(t *testing.T) {
+	i := 10
+	rxgo.From([]int{10, 20, 30}).Subscribe(
+		func(x int) {
+			if i != x {
+				t.Errorf("From Slice Test expect %v but %v", x, i)
+			}
+			i = i + 10
+		}, nil, nil)
+
+	i = 10
+	ch := make(chan int)
+	go func() {
+		ch <- 10
+		ch <- 20
+		ch <- 30
+		close(ch)
+	}()
+	rxgo.From(ch).Subscribe(
+		func(x int) {
+			if i != x {
+				t.Errorf("From Channel Test expect %v but %v", x, i)
+			}
+			i = i + 10
+		}, nil, nil)
+
+	i = 10
+	ob := rxgo.From([]int{10, 20, 30})
+	rxgo.From(ob).Subscribe(
+		func(x int) {
+			if i != x {
+				t.Errorf("From *Observable Test expect %v but %v", x, i)
+			}
+			i = i + 10
+		}, nil, nil)
+}

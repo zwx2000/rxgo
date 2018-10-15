@@ -67,6 +67,27 @@ func mapflow(o *Observable) {
 			}
 			o.outflow <- res[0].Interface()
 		}
+	case "flatMap":
+		fn = func(v interface{}) {
+			defer wg.Done()
+
+			var params = []reflect.Value{reflect.ValueOf(v)}
+			res := fv.Call(params)
+			if o.debug {
+				fmt.Println(o.name, v, res[0])
+			}
+			ro := res[0].Interface().(*Observable)
+			if ro != nil {
+				// subscribe ro without any ObserveOn model
+				ro.connect()
+				for ; ro.next != nil; ro = ro.next {
+				}
+				ch := ro.outflow
+				for x := range ch {
+					o.outflow <- x
+				}
+			}
+		}
 	case "filter":
 		fn = func(v interface{}) {
 			defer wg.Done()

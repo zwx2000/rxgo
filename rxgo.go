@@ -7,14 +7,15 @@ package rxgo
 
 import (
 	"errors"
-	"fmt"
 	"reflect"
 )
 
+type ThreadModel uint
+
 const (
-	ThreadingDefault   = 0 // one observable served by one goroutine
-	ThreadingIO        = 1 // each item served by one goroutine
-	ThreadingComputing = 2 // each item served by one goroutine in a limited group
+	ThreadingDefault   ThreadModel = iota // one observable served by one goroutine
+	ThreadingIO                           // each item served by one goroutine
+	ThreadingComputing                    // each item served by one goroutine in a limited group
 )
 
 var ErrFuncOnNext = errors.New("Func Error onNext(x)")
@@ -38,7 +39,7 @@ type Observable struct {
 	next *Observable
 	pred *Observable
 	// control model
-	threading int //threading model. if this is root, it represents obseverOn model
+	threading ThreadModel //threading model. if this is root, it represents obseverOn model
 	buf_len   uint
 	connected bool
 	// utility vars
@@ -65,9 +66,17 @@ func (o *Observable) Hot() *Observable {
 	return o
 }
 
-func (o *Observable) SubscribeOn(t int) *Observable {
+func (o *Observable) SubscribeOn(t ThreadModel) *Observable {
 	if !o.connected {
 		o.threading = t
+	}
+	return o
+}
+
+func (o *Observable) ObserveOn(t ThreadModel) *Observable {
+	if !o.connected {
+		po := o.root
+		po.threading = t
 	}
 	return o
 }
@@ -77,10 +86,10 @@ func (o *Observable) Subscribe(onNext interface{}, onError func(error), onComple
 	var observer Observer
 	if fv.Kind() != reflect.Func {
 		// Implements 不能直接使用类型作为参数，导致这种用法非常别扭
-		fmt.Printf("onNext v %v t %T \n", onNext, onNext)
+		//fmt.Printf("onNext v %v t %T \n", onNext, onNext)
 		st := reflect.TypeOf((*Observer)(nil)).Elem()
 		ft := reflect.TypeOf(onNext)
-		fmt.Println("ffffffffffffff", ft, st, ft.Implements(st))
+		//fmt.Println("ffffffffffffff", ft, st, ft.Implements(st))
 		if ft.Implements(st) {
 			observer = onNext.(Observer)
 		} else {

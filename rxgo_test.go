@@ -27,16 +27,24 @@ func TestMain(t *testing.T) {
 
 func dd(x int) int { return 2 * x }
 
-type observer struct{}
+type observer struct {
+	name string
+}
 
 func (o observer) OnNext(x interface{}) {
-	fmt.Println("observer", x)
+	fmt.Println(o.name, x)
 }
 
 func (o observer) OnError(e error) {}
 func (o observer) OnCompleted()    {}
 
 func TestObserver(t *testing.T) {
-	var s rxgo.Observer = observer{}
+	var s rxgo.Observer = observer{"test observer"}
 	rxgo.Just(1, 2, 3).Subscribe(s, nil, nil)
+}
+
+func TestFlatMap(t *testing.T) {
+	rxgo.Just(10, 20, 30).FlatMap(func(x int) *rxgo.Observable {
+		return rxgo.Just(x+1, x+2)
+	}).SubscribeOn(rxgo.ThreadingIO).Subscribe(observer{"test flatMap"}, nil, nil)
 }

@@ -55,6 +55,10 @@ func Generator(f interface{}) *Observable {
 	return o
 }
 
+func Start(f interface{}) *Observable {
+	return Generator(f)
+}
+
 // Range creates an Observable that emits a particular range of sequential integers.
 func Range(start, end int) *Observable {
 	o := newGeneratorObservable("Range")
@@ -83,6 +87,66 @@ func Just(items ...interface{}) *Observable {
 	}
 	o.operator = generator
 	return o
+}
+
+// convert Slice, Channel, and Observable into Observables
+func From(items interface{}) *Observable {
+	v, t := reflect.ValueOf(items), reflect.TypeOf(items)
+
+	if v.Kind() == reflect.Slice {
+		length := v.Len()
+		o := newGeneratorObservable("From Slice")
+
+		o.flip = func() {
+			i := 0
+			for i < length {
+				o.outflow <- v.Index(i).Interface()
+				i++
+			}
+			close(o.outflow)
+		}
+		o.operator = generator
+		return o
+	}
+
+	if v.Kind() == reflect.Chan {
+		o := newGeneratorObservable("From Channel")
+
+		o.flip = func() {
+			for {
+				val, ok := v.Recv()
+				if !ok {
+					break
+				}
+				o.outflow <- val.Interface()
+			}
+			close(o.outflow)
+		}
+		o.operator = generator
+		return o
+	}
+
+	st := reflect.TypeOf((*Observable)(nil))
+	//fmt.Println(t, st)
+	if t == st {
+		o := newGeneratorObservable("From *Observable")
+
+		o.flip = func() {
+			ro := v.Interface().(*Observable)
+			ro.connect()
+			for ; ro.next != nil; ro = ro.next {
+			}
+			ch := ro.outflow
+			for x := range ch {
+				o.outflow <- x
+			}
+			close(o.outflow)
+		}
+		o.operator = generator
+		return o
+	}
+
+	panic(ErrFuncFlip)
 }
 
 func newGeneratorObservable(name string) (o *Observable) {

@@ -5,20 +5,116 @@
 package rxgo
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
 )
 
+var (
+	typeAny        = reflect.TypeOf((*interface{})(nil)).Elem()
+	typeContext    = reflect.TypeOf((*context.Context)(nil)).Elem()
+	typeBool       = reflect.TypeOf(true)
+	typeObservable = reflect.TypeOf(&Observable{})
+)
+
+// func type check, such as `func(x int) bool` satisfy `func(x anytype) bool`
+func checkFuncUpcast(fv reflect.Value, inType, outType []reflect.Type, ctx_sup bool) (b, ctx_b bool) {
+	//fmt.Println(fv.Kind(),reflect.Func)
+	if fv.Kind() != reflect.Func {
+		return // Not func
+	}
+	ft := fv.Type()
+	if ft.NumOut() != len(outType) {
+		return // Error result parameters
+	}
+	if !ctx_sup {
+		if ft.NumIn() != len(inType) {
+			return
+		}
+	} else {
+		if ft.NumIn() == 0 {
+			if len(inType) != 0 {
+				return
+			}
+		} else {
+			if ft.In(0).Implements(typeContext) {
+				ctx_b = true
+				if ft.NumIn() != len(inType)+1 {
+					return
+				}
+			} else {
+				if ft.NumIn() != len(inType) {
+					return
+				}
+			}
+		}
+	}
+
+	for i, t := range inType {
+		var real_t reflect.Type
+		if ctx_b {
+			real_t = ft.In(i + 1)
+		} else {
+			real_t = ft.In(i)
+		}
+		fmt.Println(ft.In(0), t)
+		//todo: ptr or slice check
+		switch {
+		case real_t == t:
+		case t.Kind() == reflect.Interface && real_t.Implements(t):
+		//case ft.In(i).AssignableTo(t):
+		//case ft.In(i).ConvertibleTo(t):
+		default:
+			return
+		}
+	}
+	for i, t := range outType {
+		//fmt.Println(ft.Out(i), t)
+		//todo: ptr or slice check
+		switch {
+		case ft.Out(i) == t:
+		case t.Kind() == reflect.Interface && ft.Out(i).Implements(t):
+		default:
+			return
+		}
+	}
+	b = true
+	return
+}
+
+// wrap exception when call user function
+func userFuncCall(fv reflect.Value, params []reflect.Value) (res []reflect.Value, skip, stop bool, eout error) {
+	defer func() {
+		if e := recover(); e != nil {
+			if fe, ok := e.(FlowableError); ok {
+				eout = fe
+			}
+			switch e {
+			case ErrSkipItem:
+				skip = true
+				return
+			case ErrEoFlow:
+				stop = true
+				return
+			default:
+				panic(e)
+			}
+		}
+	}()
+
+	res = fv.Call(params)
+	return
+}
+
 // Map maps each item in Observable by the function with `func(x anytype) anytype` and
 // returns a new Observable with applied items.
 func (parent *Observable) Map(f interface{}) (o *Observable) {
 	// check validation of f
-	fv, ft := reflect.ValueOf(f), reflect.TypeOf(f)
-	if fv.Kind() != reflect.Func {
-		panic(ErrFuncFlip)
-	}
-	if ft.NumIn() != 1 && ft.NumOut() != 1 {
+	fv := reflect.ValueOf(f)
+	inType := []reflect.Type{typeAny}
+	outType := []reflect.Type{typeAny}
+	if b, _ := checkFuncUpcast(fv, inType, outType, false); !b {
 		panic(ErrFuncFlip)
 	}
 
@@ -32,11 +128,10 @@ func (parent *Observable) Map(f interface{}) (o *Observable) {
 // returns a new Observable with merged observables appling on each items.
 func (parent *Observable) FlatMap(f interface{}) (o *Observable) {
 	// check validation of f
-	fv, ft := reflect.ValueOf(f), reflect.TypeOf(f)
-	if fv.Kind() != reflect.Func {
-		panic(ErrFuncFlip)
-	}
-	if ft.NumIn() != 1 && ft.NumOut() != 1 && ft.Out(0) != reflect.TypeOf(o) {
+	fv := reflect.ValueOf(f)
+	inType := []reflect.Type{typeAny}
+	outType := []reflect.Type{typeObservable}
+	if b, _ := checkFuncUpcast(fv, inType, outType, false); !b {
 		panic(ErrFuncFlip)
 	}
 
@@ -46,7 +141,7 @@ func (parent *Observable) FlatMap(f interface{}) (o *Observable) {
 	return o
 }
 
-func mapflow(o *Observable) {
+func mapflow(ctx context.Context, o *Observable) {
 	fv := reflect.ValueOf(o.flip)
 	o.connected = true
 
@@ -62,8 +157,8 @@ func mapflow(o *Observable) {
 
 			var params = []reflect.Value{reflect.ValueOf(v)}
 			res := fv.Call(params)
-			if o.debug {
-				fmt.Println(o.name, v, res[0])
+			if o.debug != nil {
+				o.debug.OnNext(res[0].Interface())
 			}
 			o.outflow <- res[0].Interface()
 		}
@@ -73,18 +168,19 @@ func mapflow(o *Observable) {
 
 			var params = []reflect.Value{reflect.ValueOf(v)}
 			res := fv.Call(params)
-			if o.debug {
-				fmt.Println(o.name, v, res[0])
-			}
+
 			ro := res[0].Interface().(*Observable)
 			if ro != nil {
 				// subscribe ro without any ObserveOn model
-				ro.connect()
+				ro.connect(ctx)
 				for ; ro.next != nil; ro = ro.next {
 				}
 				ch := ro.outflow
 				for x := range ch {
 					o.outflow <- x
+					if o.debug != nil {
+						o.debug.OnNext(x)
+					}
 				}
 			}
 		}
@@ -94,12 +190,13 @@ func mapflow(o *Observable) {
 
 			var params = []reflect.Value{reflect.ValueOf(v)}
 			res := fv.Call(params)
-			if o.debug {
-				fmt.Println(o.name, v, res[0])
-			}
+
 			ok := res[0].Interface().(bool)
 			if ok {
 				o.outflow <- v
+				if o.debug != nil {
+					o.debug.OnNext(v)
+				}
 			}
 		}
 	}
@@ -127,11 +224,10 @@ func mapflow(o *Observable) {
 // a new Observable with the filtered items.
 func (parent *Observable) Filter(f interface{}) (o *Observable) {
 	// check validation of f
-	fv, ft := reflect.ValueOf(f), reflect.TypeOf(f)
-	if fv.Kind() != reflect.Func {
-		panic(ErrFuncFlip)
-	}
-	if ft.NumIn() != 1 && ft.NumOut() != 1 && ft.Out(0).Kind() != reflect.Bool {
+	fv := reflect.ValueOf(f)
+	inType := []reflect.Type{typeAny}
+	outType := []reflect.Type{typeBool}
+	if b, _ := checkFuncUpcast(fv, inType, outType, false); !b {
 		panic(ErrFuncFlip)
 	}
 

@@ -54,10 +54,7 @@ func generatorCustomFunc(ctx context.Context, o *Observable) {
 
 		}
 
-		close(o.outflow)
-		if o.debug != nil {
-			o.debug.OnCompleted()
-		}
+		o.closeFlow()
 	}()
 }
 
@@ -104,10 +101,7 @@ func Range(start, end int) *Observable {
 			i++
 		}
 	outfor:
-		close(o.outflow)
-		if o.debug != nil {
-			o.debug.OnCompleted()
-		}
+		o.closeFlow()
 	}
 	o.operator = generator
 	return o
@@ -129,10 +123,7 @@ func Just(items ...interface{}) *Observable {
 			}
 		}
 	outfor:
-		close(o.outflow)
-		if o.debug != nil {
-			o.debug.OnCompleted()
-		}
+		o.closeFlow()
 	}
 	o.operator = generator
 	return o
@@ -160,10 +151,7 @@ func From(items interface{}) *Observable {
 				i++
 			}
 		outfor:
-			close(o.outflow)
-			if o.debug != nil {
-				o.debug.OnCompleted()
-			}
+			o.closeFlow()
 		}
 		o.operator = generator
 		return o
@@ -188,10 +176,7 @@ func From(items interface{}) *Observable {
 				}
 			}
 		outfor:
-			close(o.outflow)
-			if o.debug != nil {
-				o.debug.OnCompleted()
-			}
+			o.closeFlow()
 		}
 		o.operator = generator
 		return o
@@ -212,10 +197,11 @@ func From(items interface{}) *Observable {
 				select {
 				case o.outflow <- x:
 				case <-ctx.Done():
-					break
+					goto outfor
 				}
 			}
-			close(o.outflow)
+		outfor:
+			o.closeFlow()
 		}
 		o.operator = generator
 		return o
@@ -233,7 +219,7 @@ func Never() *Observable {
 		select {
 		case <-ctx.Done():
 		}
-		close(o.outflow)
+		o.closeFlow()
 	}
 	o.operator = generator
 	return o
@@ -244,7 +230,7 @@ func Empty() *Observable {
 	o := newGeneratorObservable("Empty")
 
 	o.flip = func(ctx context.Context) {
-		close(o.outflow)
+		o.closeFlow()
 	}
 	o.operator = generator
 	return o
@@ -259,7 +245,7 @@ func Throw(e error) *Observable {
 		case o.outflow <- e:
 		case <-ctx.Done():
 		}
-		close(o.outflow)
+		o.closeFlow()
 	}
 	o.operator = generator
 	return o

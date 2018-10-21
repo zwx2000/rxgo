@@ -232,3 +232,17 @@ func (o *Observable) Debug(monitor Observer) *Observable {
 	o.debug = monitor
 	return o
 }
+
+func (o *Observable) closeFlow() *Observable {
+	if !o.connected {
+		//Todo
+		return o
+	}
+	// maybe need waiting for parent observable closed
+	close(o.outflow)
+	if o.debug != nil {
+		o.debug.OnCompleted()
+	}
+	o.connected = false
+	return o
+}

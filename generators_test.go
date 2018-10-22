@@ -43,7 +43,7 @@ func TestRangeWithCancel(t *testing.T) {
 		return ctx
 	}
 
-	rxgo.Range(0, 10).Debug(observer{"Range test"}).Subscribe(oberver)
+	rxgo.Range(0, 10).Debug(true).Subscribe(oberver)
 }
 
 func TestGenerator(t *testing.T) {

@@ -143,7 +143,6 @@ func (parent *Observable) FlatMap(f interface{}) (o *Observable) {
 
 func mapflow(ctx context.Context, o *Observable) {
 	fv := reflect.ValueOf(o.flip)
-	o.connected = true
 
 	in := o.pred.outflow
 	var wg sync.WaitGroup
@@ -216,7 +215,7 @@ func mapflow(ctx context.Context, o *Observable) {
 			}
 		}
 		wg.Wait() //waiting all go-routines completed
-		close(o.outflow)
+		o.closeFlow()
 	}()
 }
 

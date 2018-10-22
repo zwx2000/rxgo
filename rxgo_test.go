@@ -27,7 +27,7 @@ func TestMain(t *testing.T) {
 
 	// test Subscribe on any
 	ob := rxgo.Just(10, 20, 30).Map(dd)
-	ob1 := ob.Map(dd).SubscribeOn(rxgo.ThreadingIO).Debug(observer{"main test 1"}).Map(dd)
+	ob1 := ob.Map(dd).SubscribeOn(rxgo.ThreadingIO).Debug(true).Map(dd)
 	ob1.Subscribe(func(x int) {
 		fmt.Println("Just", x)
 	})
@@ -49,7 +49,10 @@ func TestObserver(t *testing.T) {
 }
 
 func TestFlatMap(t *testing.T) {
-	rxgo.Just(10, 20, 30).FlatMap(func(x int) *rxgo.Observable {
+	flow := rxgo.Just(10, 20, 30).FlatMap(func(x int) *rxgo.Observable {
 		return rxgo.Just(x+1, x+2)
-	}).SubscribeOn(rxgo.ThreadingIO).Subscribe(observer{"test flatMap"})
+	}).SubscribeOn(rxgo.ThreadingIO)
+
+	flow.Subscribe(observer{"test flatMap"})
+	flow.Subscribe(observer{"test flatMap again"})
 }

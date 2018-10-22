@@ -13,7 +13,7 @@ import (
 func generator(ctx context.Context, o *Observable) {
 	fv := reflect.ValueOf(o.flip)
 	params := []reflect.Value{reflect.ValueOf(ctx)}
-	o.connected = true
+
 	go fv.Call(params)
 }
 
@@ -24,7 +24,6 @@ func generatorCustomFunc(ctx context.Context, o *Observable) {
 	if o.flip_sup_ctx {
 		params = []reflect.Value{reflect.ValueOf(ctx)}
 	}
-	o.connected = true
 
 	go func() {
 		for end := false; !end; {

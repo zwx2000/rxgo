@@ -145,6 +145,7 @@ func (o *Observable) Hot(ctx context.Context) *Observable {
 		o.outflow = make(chan interface{}, o.buf_len)
 		o.connected = true
 		o.operator(ctx, o)
+		//fmt.Println("conneted", o.name)
 	}
 	return o
 }
@@ -192,6 +193,7 @@ func (o *Observable) Subscribe(ob interface{}) {
 		//fmt.Println("ctx geted!", ctx)
 	}
 
+	//fmt.Println("begin conneted", o.name)
 	o.connect(ctx)
 	if ctxok {
 		oc.OnConnected()
@@ -228,8 +230,13 @@ func (o *Observable) SetBufferLen(length uint) *Observable {
 	return o
 }
 
-func (o *Observable) Debug(monitor Observer) *Observable {
-	o.debug = monitor
+func (o *Observable) Debug(debug bool) *Observable {
+	if debug && o.debug == nil {
+		o.debug = InnerObserver{o.name + " debug "}
+	}
+	if !debug && o.debug != nil {
+		o.debug = nil
+	}
 	return o
 }
 

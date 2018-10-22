@@ -6,7 +6,6 @@ package rxgo
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"sync"
 )
@@ -58,7 +57,7 @@ func checkFuncUpcast(fv reflect.Value, inType, outType []reflect.Type, ctx_sup b
 		} else {
 			real_t = ft.In(i)
 		}
-		fmt.Println(ft.In(0), t)
+
 		//todo: ptr or slice check
 		switch {
 		case real_t == t:

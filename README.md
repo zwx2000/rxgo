@@ -89,4 +89,42 @@ The result is `022461016`.  the source `Start(fibonacci(10))` generates dataflow
 
 ### Connectable observables
 
+A Connectable Observable resembles an ordinary Observable, except that it does not begin emitting items when it is subscribed to, but only when its connect() method is called. 
+There are two phases for data pipeline.
+
+The first phase is called _definition_. we define source function or operators for a pipeline that is the same as assign work roles for each node on it
+
+The next phase is called _runtime_. when any observable call `Subscribe(...)` , the pipeline include this observable will connect its all node or 
+appoint one or more workers stand aside by each node. if predecess worker emit a data, the worker will play the role defined before, 
+and send result to the next worker
+
+The simple program shows the function of **Pipeline Restart**
+
+```go
+package main
+
+import (
+	"fmt"
+	RxGo "github.com/pmlpml/rxgo"
+)
+
+func main() {
+    //define pipeline
+	source := RxGo.Just("Hello", "World", "!")
+	next := source.Map(func(s string) string {
+		return s + " "
+	})
+    //run pipeline
+	next.Subscribe(func(x string) {
+		fmt.Print(x)
+	})
+	fmt.Println()
+	source.Subscribe(func(x string) {
+		fmt.Print(x)
+	})
+}
+```
+
+the program will print `Hello World ! ` twice!
+
 

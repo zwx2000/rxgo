@@ -98,7 +98,7 @@ The next phase is called _runtime_. when any observable call `Subscribe(...)` , 
 appoint one or more workers stand aside by each node. if predecess worker emit a data, the worker will play the role defined before, 
 and send result to the next worker
 
-The simple program shows the function of **Pipeline Restart**
+The simple program shows the function of a **Pipeline Restart**
 
 ```go
 package main

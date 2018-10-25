@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 )
 
 type ThreadModel uint
@@ -106,14 +107,26 @@ func (o ObserverMonitor) Unsubscribe() {
 	}
 }
 
+type streamOperator interface {
+	op(ctx context.Context, o *Observable)
+}
+
+type operatorFunc func(context.Context, *Observable)
+
+func (f operatorFunc) op(ctx context.Context, o *Observable) {
+	f(ctx, o)
+}
+
 // An Observable is a 'collection of items that arrive over time'. Observables can be used to model asynchronous events.
 // Observables can also be chained by operators to transformed, combined those items
 // The Observable's operators, by default, run with a channel size of 128 elements except that the source (first) observable has no buffer
 type Observable struct {
-	name     string
+	name string
+	mu   sync.Mutex // lock all when subscribe
+	//
 	flip     interface{} // transformation function
 	outflow  chan interface{}
-	operator func(ctx context.Context, o *Observable)
+	operator streamOperator
 	// chain of Observables
 	root *Observable
 	next *Observable
@@ -121,7 +134,6 @@ type Observable struct {
 	// control model
 	threading ThreadModel //threading model. if this is root, it represents obseverOn model
 	buf_len   uint
-	connected bool
 	// utility vars
 	debug             Observer
 	flip_sup_ctx      bool //indicate that flip function use context as first paramter
@@ -141,31 +153,25 @@ func (o *Observable) connect(ctx context.Context) {
 
 // connect one Observable
 func (o *Observable) Hot(ctx context.Context) *Observable {
-	if !o.connected {
-		o.outflow = make(chan interface{}, o.buf_len)
-		o.connected = true
-		o.operator(ctx, o)
-		//fmt.Println("conneted", o.name)
-	}
+	o.outflow = make(chan interface{}, o.buf_len)
+	o.operator.op(ctx, o)
+	//fmt.Println("conneted", o.name, o.outflow)
 	return o
 }
 
 func (o *Observable) SubscribeOn(t ThreadModel) *Observable {
-	if !o.connected {
-		o.threading = t
-	}
+	o.threading = t
 	return o
 }
 
 func (o *Observable) ObserveOn(t ThreadModel) *Observable {
-	if !o.connected {
-		po := o.root
-		po.threading = t
-	}
+	po := o.root
+	po.threading = t
 	return o
 }
 
 func (o *Observable) Subscribe(ob interface{}) {
+	o.mu.Lock()
 	fv, ft := reflect.ValueOf(ob), reflect.TypeOf(ob)
 
 	var observer Observer
@@ -203,7 +209,11 @@ func (o *Observable) Subscribe(ob interface{}) {
 	po := o
 	for ; po.next != nil; po = po.next {
 	}
-	for x := range po.outflow {
+
+	in := po.outflow
+	o.mu.Unlock()
+
+	for x := range in {
 		if observer != nil {
 			if e, ok := x.(error); ok {
 				observer.OnError(e)
@@ -230,6 +240,13 @@ func (o *Observable) SetBufferLen(length uint) *Observable {
 	return o
 }
 
+// set a observer to monite items in data stream
+func (o *Observable) SetMonitor(observer Observer) *Observable {
+	o.debug = observer
+	return o
+}
+
+// set a innerMonitor for debug
 func (o *Observable) Debug(debug bool) *Observable {
 	if debug && o.debug == nil {
 		o.debug = InnerObserver{o.name + " debug "}
@@ -240,16 +257,31 @@ func (o *Observable) Debug(debug bool) *Observable {
 	return o
 }
 
-func (o *Observable) closeFlow() *Observable {
-	if !o.connected {
-		//Todo
-		return o
+func (o *Observable) sendToFlow(ctx context.Context, item interface{}, out chan interface{}) (end bool) {
+	//fmt.Println("send chan ", o.name, item, out)
+	select {
+	case out <- item:
+		if e, ok := item.(error); ok {
+			if o.debug != nil {
+				o.debug.OnError(e)
+			}
+		} else {
+			if o.debug != nil {
+				o.debug.OnNext(item)
+			}
+		}
+	case <-ctx.Done():
+		end = true
 	}
+	return
+}
+
+func (o *Observable) closeFlow(out chan interface{}) *Observable {
 	// maybe need waiting for parent observable closed
-	close(o.outflow)
+	//fmt.Println("close chan ", o.name, out)
+	close(out)
 	if o.debug != nil {
 		o.debug.OnCompleted()
 	}
-	o.connected = false
 	return o
 }

@@ -9,51 +9,22 @@ import (
 	"reflect"
 )
 
-// start flip which channel is closed by itself
-func generator(ctx context.Context, o *Observable) {
-	fv := reflect.ValueOf(o.flip)
-	params := []reflect.Value{reflect.ValueOf(ctx)}
-
-	go fv.Call(params)
+type sourceOperater struct {
+	opFunc func(ctx context.Context, o *Observable, out chan interface{}) (end bool)
 }
 
-// start flip as func() (x anytype, end bool)
-func generatorCustomFunc(ctx context.Context, o *Observable) {
-	fv := reflect.ValueOf(o.flip)
-	params := []reflect.Value{}
-	if o.flip_sup_ctx {
-		params = []reflect.Value{reflect.ValueOf(ctx)}
-	}
+func (sop sourceOperater) op(ctx context.Context, o *Observable) {
+	// must hold defintion of flow resourcs here, such as chan etc., that is allocated when connected
+	// this resurces may be changed when operation routine is running.
+	out := o.outflow
+	//fmt.Println(o.name, "source out chan ", out)
 
+	// Scheduler
 	go func() {
 		for end := false; !end; {
-			rs, skip, stop, e := userFuncCall(fv, params)
-			end, _ = (rs[1].Interface()).(bool)
-			var item interface{} = rs[0].Interface()
-			if stop {
-				end = true
-			}
-			if skip {
-				continue
-			}
-			if e != nil {
-				item = e
-			}
-
-			if !end {
-				select {
-				case o.outflow <- item:
-					if o.debug != nil {
-						o.debug.OnNext(item)
-					}
-				case <-ctx.Done():
-					end = true
-				}
-			}
-
+			end = sop.opFunc(ctx, o, out)
 		}
-
-		o.closeFlow()
+		o.closeFlow(out)
 	}()
 }
 
@@ -73,9 +44,42 @@ func Generator(name string, f interface{}) *Observable {
 	o.flip_sup_ctx = ctx_sup
 
 	o.flip = fv.Interface()
-	o.operator = generatorCustomFunc
+	o.operator = customSource
 	return o
 }
+
+var customSource = sourceOperater{func(ctx context.Context, o *Observable, out chan interface{}) (end bool) {
+	fv := reflect.ValueOf(o.flip)
+	params := []reflect.Value{}
+	if o.flip_sup_ctx {
+		params = []reflect.Value{reflect.ValueOf(ctx)}
+	}
+
+	for end := false; !end; {
+		rs, skip, stop, e := userFuncCall(fv, params)
+
+		var item interface{}
+		if stop {
+			return true
+		}
+		if skip {
+			continue
+		}
+		if e != nil {
+			item = e
+		}
+		if len(rs) > 0 {
+			end, _ = (rs[1].Interface()).(bool)
+			item = rs[0].Interface()
+		}
+		// send data
+		if !end {
+			end = o.sendToFlow(ctx, item, out)
+		}
+	}
+
+	return true
+}}
 
 // Generator creates an Observable with the provided item(s) producing by the function `func()  (val anytype, end bool)`
 func Start(f interface{}) *Observable {
@@ -86,47 +90,45 @@ func Start(f interface{}) *Observable {
 func Range(start, end int) *Observable {
 	o := newGeneratorObservable("Range")
 
-	o.flip = func(ctx context.Context) {
+	o.flip = func(ctx context.Context, out chan interface{}) {
 		i := start
 		for i < end {
-			select {
-			case o.outflow <- i:
-				if o.debug != nil {
-					o.debug.OnNext(i)
-				}
-			case <-ctx.Done():
-				goto outfor
+			if b := o.sendToFlow(ctx, i, out); b {
+				return
 			}
 			i++
 		}
-	outfor:
-		o.closeFlow()
 	}
-	o.operator = generator
+	o.operator = rangeSource
 	return o
 }
+
+var rangeSource = sourceOperater{func(ctx context.Context, o *Observable, out chan interface{}) (end bool) {
+	fv := reflect.ValueOf(o.flip)
+	params := []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(out)}
+	fv.Call(params)
+	return true
+}}
 
 // Just creates an Observable with the provided item(s).
 func Just(items ...interface{}) *Observable {
 	o := newGeneratorObservable("Just")
 
-	o.flip = func(ctx context.Context) {
+	o.flip = func(ctx context.Context, out chan interface{}) {
 		for _, item := range items {
-			select {
-			case o.outflow <- item:
-				if o.debug != nil {
-					o.debug.OnNext(item)
-				}
-			case <-ctx.Done():
-				goto outfor
+			if b := o.sendToFlow(ctx, item, out); b {
+				return
 			}
 		}
-	outfor:
-		o.closeFlow()
 	}
-	o.operator = generator
+	o.operator = justSource
 	return o
 }
+
+var justSource = rangeSource
+var fromSlice = rangeSource
+var fromChannel = rangeSource
+var fromObservable = rangeSource
 
 // convert Slice, Channel, and Observable into Observables
 func From(items interface{}) *Observable {
@@ -136,48 +138,46 @@ func From(items interface{}) *Observable {
 		length := v.Len()
 		o := newGeneratorObservable("From Slice")
 
-		o.flip = func(ctx context.Context) {
+		o.flip = func(ctx context.Context, out chan interface{}) {
 			i := 0
 			for i < length {
-				select {
-				case o.outflow <- v.Index(i).Interface():
-					if o.debug != nil {
-						o.debug.OnNext(v.Index(i).Interface())
-					}
-				case <-ctx.Done():
-					goto outfor
+				item := v.Index(i).Interface()
+				if b := o.sendToFlow(ctx, item, out); b {
+					return
 				}
 				i++
 			}
-		outfor:
-			o.closeFlow()
 		}
-		o.operator = generator
+		o.operator = fromSlice
 		return o
 	}
 
 	if v.Kind() == reflect.Chan {
 		o := newGeneratorObservable("From Channel")
 
-		o.flip = func(ctx context.Context) {
+		o.flip = func(ctx context.Context, out chan interface{}) {
 			for {
-				val, ok := v.Recv()
-				if !ok {
-					break
+				// details: https://godoc.org/reflect#Select
+				var selectcases = []reflect.SelectCase{
+					reflect.SelectCase{Dir: reflect.SelectRecv, Chan: v},
+					reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())},
 				}
-				select {
-				case o.outflow <- val.Interface():
-					if o.debug != nil {
-						o.debug.OnNext(val.Interface())
-					}
-				case <-ctx.Done():
-					goto outfor
+				chosen, recv, recvOK := reflect.Select(selectcases)
+				if !recvOK {
+					return
+				}
+				switch chosen {
+				case 0:
+				case 1:
+					return
+				}
+				item := recv.Interface()
+				if b := o.sendToFlow(ctx, item, out); b {
+					return
 				}
 			}
-		outfor:
-			o.closeFlow()
 		}
-		o.operator = generator
+		o.operator = fromChannel
 		return o
 	}
 
@@ -186,23 +186,21 @@ func From(items interface{}) *Observable {
 	if t == st {
 		o := newGeneratorObservable("From *Observable")
 
-		o.flip = func(ctx context.Context) {
+		o.flip = func(ctx context.Context, out chan interface{}) {
 			ro := v.Interface().(*Observable)
-			ro.connect(ctx)
 			for ; ro.next != nil; ro = ro.next {
 			}
+			ro.mu.Lock()
+			ro.connect(ctx)
 			ch := ro.outflow
-			for x := range ch {
-				select {
-				case o.outflow <- x:
-				case <-ctx.Done():
-					goto outfor
+			ro.mu.Unlock()
+			for item := range ch {
+				if b := o.sendToFlow(ctx, item, out); b {
+					return
 				}
 			}
-		outfor:
-			o.closeFlow()
 		}
-		o.operator = generator
+		o.operator = fromObservable
 		return o
 	}
 
@@ -214,24 +212,26 @@ func From(items interface{}) *Observable {
 func Never() *Observable {
 	o := newGeneratorObservable("Never")
 
-	o.flip = func(ctx context.Context) {
+	o.flip = func(ctx context.Context, out chan interface{}) {
 		select {
 		case <-ctx.Done():
 		}
-		o.closeFlow()
 	}
-	o.operator = generator
+	o.operator = neverSource
 	return o
 }
+
+var neverSource = rangeSource
+var emptySource = rangeSource
+var throwSource = rangeSource
 
 // create an Observable that emits no items but terminates normally
 func Empty() *Observable {
 	o := newGeneratorObservable("Empty")
 
-	o.flip = func(ctx context.Context) {
-		o.closeFlow()
+	o.flip = func(ctx context.Context, out chan interface{}) {
 	}
-	o.operator = generator
+	o.operator = emptySource
 	return o
 }
 
@@ -239,14 +239,11 @@ func Empty() *Observable {
 func Throw(e error) *Observable {
 	o := newGeneratorObservable("Throw")
 
-	o.flip = func(ctx context.Context) {
-		select {
-		case o.outflow <- e:
-		case <-ctx.Done():
-		}
-		o.closeFlow()
+	o.flip = func(ctx context.Context, out chan interface{}) {
+		item := e
+		o.sendToFlow(ctx, item, out)
 	}
-	o.operator = generator
+	o.operator = throwSource
 	return o
 }
 

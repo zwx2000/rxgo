@@ -88,6 +88,7 @@ func userFuncCall(fv reflect.Value, params []reflect.Value) (res []reflect.Value
 		if e := recover(); e != nil {
 			if fe, ok := e.(FlowableError); ok {
 				eout = fe
+				return
 			}
 			switch e {
 			case ErrSkipItem:
@@ -113,15 +114,92 @@ func (parent *Observable) Map(f interface{}) (o *Observable) {
 	fv := reflect.ValueOf(f)
 	inType := []reflect.Type{typeAny}
 	outType := []reflect.Type{typeAny}
-	if b, _ := checkFuncUpcast(fv, inType, outType, false); !b {
+	b, ctx_sup := checkFuncUpcast(fv, inType, outType, true)
+	if !b {
 		panic(ErrFuncFlip)
 	}
 
 	o = parent.newTransformObservable("map")
+	o.flip_sup_ctx = ctx_sup
 	o.flip = fv.Interface()
-	o.operator = mapflow
+	o.operator = mapOperater
 	return o
 }
+
+type transOperater struct {
+	opFunc func(ctx context.Context, o *Observable, item reflect.Value, out chan interface{}) (end bool)
+}
+
+func (tsop transOperater) op(ctx context.Context, o *Observable) {
+	// must hold defintion of flow resourcs here, such as chan etc., that is allocated when connected
+	// this resurces may be changed when operation routine is running.
+	in := o.pred.outflow
+	out := o.outflow
+	//fmt.Println(o.name, "operator in/out chan ", in, out)
+	var wg sync.WaitGroup
+
+	go func() {
+		end := false
+		for x := range in {
+			if end {
+				continue
+			}
+			// can not pass a interface as parameter (pointer) to gorountion for it may change its value outside!
+			xv := reflect.ValueOf(x)
+			// send an error to stream if the flip not accept error
+			if e, ok := x.(error); ok && !o.flip_accept_error {
+				o.sendToFlow(ctx, e, out)
+				continue
+			}
+			// scheduler
+			switch threading := o.threading; threading {
+			case ThreadingDefault:
+				if tsop.opFunc(ctx, o, xv, out) {
+					end = true
+				}
+			case ThreadingIO:
+				fallthrough
+			case ThreadingComputing:
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if tsop.opFunc(ctx, o, xv, out) {
+						end = true
+					}
+				}()
+			default:
+			}
+		}
+
+		wg.Wait() //waiting all go-routines completed
+		o.closeFlow(out)
+	}()
+}
+
+var mapOperater = transOperater{func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
+
+	fv := reflect.ValueOf(o.flip)
+	var params = []reflect.Value{x}
+	rs, skip, stop, e := userFuncCall(fv, params)
+
+	var item interface{} = rs[0].Interface()
+	if stop {
+		end = true
+		return
+	}
+	if skip {
+		return
+	}
+	if e != nil {
+		item = e
+	}
+	// send data
+	if !end {
+		end = o.sendToFlow(ctx, item, out)
+	}
+
+	return
+}}
 
 // FlatMap maps each item in Observable by the function with `func(x anytype) (o *Observable) ` and
 // returns a new Observable with merged observables appling on each items.
@@ -130,93 +208,61 @@ func (parent *Observable) FlatMap(f interface{}) (o *Observable) {
 	fv := reflect.ValueOf(f)
 	inType := []reflect.Type{typeAny}
 	outType := []reflect.Type{typeObservable}
-	if b, _ := checkFuncUpcast(fv, inType, outType, false); !b {
+	b, ctx_sup := checkFuncUpcast(fv, inType, outType, true)
+	if !b {
 		panic(ErrFuncFlip)
 	}
 
 	o = parent.newTransformObservable("flatMap")
+	o.flip_sup_ctx = ctx_sup
 	o.flip = fv.Interface()
-	o.operator = mapflow
+	o.operator = flatMapOperater
 	return o
 }
 
-func mapflow(ctx context.Context, o *Observable) {
+var flatMapOperater = transOperater{func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
+
 	fv := reflect.ValueOf(o.flip)
+	var params = []reflect.Value{x}
+	//fmt.Println("x is ", x)
+	rs, skip, stop, e := userFuncCall(fv, params)
 
-	in := o.pred.outflow
-	var wg sync.WaitGroup
-	var fn func(v interface{})
+	var item = rs[0].Interface().(*Observable)
 
-	// call map(v)
-	switch fname := o.name; fname {
-	case "map":
-		fn = func(v interface{}) {
-			defer wg.Done()
-
-			var params = []reflect.Value{reflect.ValueOf(v)}
-			res := fv.Call(params)
-			if o.debug != nil {
-				o.debug.OnNext(res[0].Interface())
-			}
-			o.outflow <- res[0].Interface()
+	if stop {
+		end = true
+		return
+	}
+	if skip {
+		return
+	}
+	if e != nil {
+		end = o.sendToFlow(ctx, e, out)
+		if end {
+			return
 		}
-	case "flatMap":
-		fn = func(v interface{}) {
-			defer wg.Done()
-
-			var params = []reflect.Value{reflect.ValueOf(v)}
-			res := fv.Call(params)
-
-			ro := res[0].Interface().(*Observable)
-			if ro != nil {
-				// subscribe ro without any ObserveOn model
-				ro.connect(ctx)
-				for ; ro.next != nil; ro = ro.next {
-				}
-				ch := ro.outflow
-				for x := range ch {
-					o.outflow <- x
-					if o.debug != nil {
-						o.debug.OnNext(x)
-					}
-				}
+		return
+	}
+	// send data
+	if !end {
+		if item != nil {
+			// subscribe ro without any ObserveOn model
+			ro := item
+			for ; ro.next != nil; ro = ro.next {
 			}
-		}
-	case "filter":
-		fn = func(v interface{}) {
-			defer wg.Done()
+			ro.connect(ctx)
 
-			var params = []reflect.Value{reflect.ValueOf(v)}
-			res := fv.Call(params)
-
-			ok := res[0].Interface().(bool)
-			if ok {
-				o.outflow <- v
-				if o.debug != nil {
-					o.debug.OnNext(v)
+			ch := ro.outflow
+			for x := range ch {
+				end = o.sendToFlow(ctx, x, out)
+				if end {
+					return
 				}
 			}
 		}
 	}
-
-	go func() {
-		for x := range in {
-			switch threading := o.threading; threading {
-			case ThreadingDefault:
-				wg.Add(1)
-				fn(x)
-			case ThreadingIO:
-				fallthrough
-			case ThreadingComputing:
-				wg.Add(1)
-				go fn(x)
-			default:
-			}
-		}
-		wg.Wait() //waiting all go-routines completed
-		o.closeFlow()
-	}()
-}
+	return
+}}
 
 // Filter `func(x anytype) bool` filters items in the original Observable and returns
 // a new Observable with the filtered items.
@@ -225,15 +271,44 @@ func (parent *Observable) Filter(f interface{}) (o *Observable) {
 	fv := reflect.ValueOf(f)
 	inType := []reflect.Type{typeAny}
 	outType := []reflect.Type{typeBool}
-	if b, _ := checkFuncUpcast(fv, inType, outType, false); !b {
+	b, ctx_sup := checkFuncUpcast(fv, inType, outType, true)
+	if !b {
 		panic(ErrFuncFlip)
 	}
 
 	o = parent.newTransformObservable("filter")
+	o.flip_sup_ctx = ctx_sup
 	o.flip = fv.Interface()
-	o.operator = mapflow
+	o.operator = filterOperater
 	return o
 }
+
+var filterOperater = transOperater{func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
+
+	fv := reflect.ValueOf(o.flip)
+	var params = []reflect.Value{x}
+	rs, skip, stop, e := userFuncCall(fv, params)
+
+	var item interface{} = rs[0].Interface()
+	if stop {
+		end = true
+		return
+	}
+	if skip {
+		return
+	}
+	if e != nil {
+		item = e
+	}
+	// send data
+	if !end {
+		if b, ok := item.(bool); ok && b {
+			end = o.sendToFlow(ctx, x.Interface(), out)
+		}
+	}
+
+	return
+}}
 
 func (parent *Observable) newTransformObservable(name string) (o *Observable) {
 	//new Observable

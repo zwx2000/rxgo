@@ -3,6 +3,7 @@ package rxgo_test
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/pmlpml/rxgo"
 )
@@ -49,10 +50,15 @@ func TestObserver(t *testing.T) {
 }
 
 func TestFlatMap(t *testing.T) {
-	flow := rxgo.Just(10, 20, 30).FlatMap(func(x int) *rxgo.Observable {
+	flow := rxgo.Just(10, 20, 30).Map(func(x int) int {
+		return x + 1
+	})
+	/* 	.FlatMap(func(x int) *rxgo.Observable {
 		return rxgo.Just(x+1, x+2)
-	}).SubscribeOn(rxgo.ThreadingIO)
+	}).SubscribeOn(rxgo.ThreadingIO) */
 
-	flow.Subscribe(observer{"test flatMap"})
+	go flow.Subscribe(observer{"test flatMap"})
+	//time.Sleep(time.Nanosecond * 1000)
 	flow.Subscribe(observer{"test flatMap again"})
+	time.Sleep(time.Microsecond * 1000)
 }

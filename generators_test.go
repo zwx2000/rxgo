@@ -2,38 +2,34 @@ package rxgo_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/pmlpml/rxgo"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRange(t *testing.T) {
-	i := 0
-	rxgo.Range(0, 10).Subscribe(
-		func(x int) {
-			if i != x {
-				t.Errorf("Ragne Test expect %v but %v", x, i)
-			}
-			i++
-		})
+	res := []int{}
+	rxgo.Range(0, 5).Subscribe(func(x int) {
+		res = append(res, x)
+	})
+
+	assert.Equal(t, []int{0, 1, 2, 3, 4}, res, "Ragne Test Error!")
 }
 
 func TestRangeWithCancel(t *testing.T) {
-	i := 0
 
+	res := []int{}
 	var oberver = rxgo.ObserverMonitor{}
 	oberver.Next = func(y interface{}) {
 		x := y.(int)
-		if i != x {
-			t.Errorf("Ragne Test expect %v but %v", x, i)
-		}
-		if x >= 5 {
-			fmt.Println("End to 5")
+		res = append(res, x)
+		if x >= 3 {
 			oberver.Unsubscribe()
 		}
-		i++
 	}
 
 	oberver.Context = func() context.Context {
@@ -43,21 +39,20 @@ func TestRangeWithCancel(t *testing.T) {
 		return ctx
 	}
 
-	rxgo.Range(0, 10).Debug(true).Subscribe(oberver)
+	rxgo.Range(0, 10).Subscribe(oberver)
+	assert.False(t, len(res) > 5, "Range cancel failure!")
+	//fmt.Println(res)
 }
 
 func TestGenerator(t *testing.T) {
-	i := int64(1)
-
-	//e := errors.New("Flowable Errr")
 	// generator function func() (x anytype, end bool)
 	rangex := func(start, end int64) func(ctx context.Context) (int64, bool) {
 		i := start - 1
 		return func(ctx context.Context) (int64, bool) {
-			if i < end {
+			if i < end-1 {
 				i++
 				if i == 3 {
-					//panic(rxgo.FlowableError{Err: e, Elements: nil})
+					panic(rxgo.FlowableError{Err: errors.New("any"), Elements: nil})
 				}
 				return i, false
 			}
@@ -65,37 +60,36 @@ func TestGenerator(t *testing.T) {
 		}
 	}
 
+	res := []int64{}
 	rxgo.Start(rangex(1, 5)).Subscribe(
 		func(x int64) {
-			if i != x {
-				t.Errorf("Ragne Test expect %v but %v", x, i)
-			}
-			i++
+			res = append(res, x)
 		})
+	//fmt.Println(res)
+	assert.Equal(t, []int64{1, 2, 4}, res, "Generator Test Error!")
 }
 
 func TestJust(t *testing.T) {
-	i := 10
+	res := []int{}
 	rxgo.Just(10, 20, 30).Subscribe(
 		func(x int) {
-			if i != x {
-				t.Errorf("Ragne Test expect %v but %v", x, i)
-			}
-			i = i + 10
+			res = append(res, x)
 		})
+
+	assert.Equal(t, []int{10, 20, 30}, res, "Just Test Error!")
 }
 
-func TestFrom(t *testing.T) {
-	i := 10
+func TestFromSlice(t *testing.T) {
+	res := []int{}
 	rxgo.From([]int{10, 20, 30}).Subscribe(
 		func(x int) {
-			if i != x {
-				t.Errorf("From Slice Test expect %v but %v", x, i)
-			}
-			i = i + 10
+			res = append(res, x)
 		})
 
-	i = 10
+	assert.Equal(t, []int{10, 20, 30}, res, "FromSlice Test Error!")
+}
+
+func TestFromChan(t *testing.T) {
 	ch := make(chan int)
 	go func() {
 		ch <- 10
@@ -103,53 +97,53 @@ func TestFrom(t *testing.T) {
 		ch <- 30
 		close(ch)
 	}()
+
+	res := []int{}
 	rxgo.From(ch).Subscribe(
 		func(x int) {
-			if i != x {
-				t.Errorf("From Channel Test expect %v but %v", x, i)
-			}
-			i = i + 10
+			res = append(res, x)
 		})
 
-	i = 10
-	ob := rxgo.From([]int{10, 20, 30})
+	assert.Equal(t, []int{10, 20, 30}, res, "FromChan Test Error!")
+}
+
+func TestFromObservable(t *testing.T) {
+	res := []int{}
+	ob := rxgo.From([]int{10, 20, 30}).Map(func(x int) int {
+		return x + 1
+	})
 	rxgo.From(ob).Subscribe(
 		func(x int) {
-			if i != x {
-				t.Errorf("From *Observable Test expect %v but %v", x, i)
-			}
-			i = i + 10
+			res = append(res, x)
 		})
+	assert.Equal(t, []int{11, 21, 31}, res, "FromObservable Test Error!")
 }
 
 func TestThrow(t *testing.T) {
-	fail := true
+	var ee error
 	rxgo.Throw(rxgo.ErrEoFlow).Subscribe(
 		rxgo.ObserverMonitor{
 			Next: func(x interface{}) {
 				t.Errorf("No data expected! but %v", x)
 			},
 			Error: func(e error) {
-				fail = false
-				fmt.Println("Find e", e)
-				if e != rxgo.ErrEoFlow {
-					t.Errorf("Throw Test expect %v but %v", rxgo.ErrEoFlow, e)
-				}
+				ee = e
 			},
 			Completed: func() {
 				fmt.Println("Completed")
 			},
 		})
-	if fail {
-		t.Errorf("No Error !")
-	}
+
+	assert.Error(t, ee, "No error")
 }
 
 func TestEmpty(t *testing.T) {
+	var b bool
 	rxgo.Empty().Subscribe(
 		func(x interface{}) {
-			t.Errorf("Ragne Test expect %v ", "Nothng")
+			b = true
 		})
+	assert.False(t, b, "Not Empty")
 }
 
 func TestNeverWithCancel(t *testing.T) {
@@ -163,14 +157,14 @@ func TestNeverWithCancel(t *testing.T) {
 	oberver.Context = func() context.Context {
 		ctx, cancel := context.WithCancel(context.Background())
 		oberver.CancelObservables = cancel
-		fmt.Println("ctx created ", ctx)
+		//fmt.Println("ctx created ", ctx)
 		return ctx
 	}
 
 	oberver.AfterConnected = func() {
 		go func() {
-			<-time.After(time.Second * 1)
-			fmt.Println("time over!")
+			<-time.After(time.Nanosecond * 1000)
+			//fmt.Println("time over!")
 			oberver.Unsubscribe()
 		}()
 	}

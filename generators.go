@@ -21,15 +21,32 @@ func (sop sourceOperater) op(ctx context.Context, o *Observable) {
 
 	// Scheduler
 	go func() {
-		for end := false; !end; {
+		for end := false; !end; { // made panic op re-enter
 			end = sop.opFunc(ctx, o, out)
 		}
 		o.closeFlow(out)
 	}()
 }
 
-// Generator creates an Observable with the provided item(s) producing by the function `func()  (val anytype, end bool)`
-func Generator(name string, f interface{}) *Observable {
+func Generator(sf sourceFunc) *Observable {
+	o := newGeneratorObservable("CustomSource")
+	o.flip = sf
+	o.operator = sourceSource
+	return o
+}
+
+var sourceSource = sourceOperater{func(ctx context.Context, o *Observable, out chan interface{}) (end bool) {
+	sf := o.flip.(sourceFunc)
+	send := func(x interface{}) (endSignal bool) {
+		endSignal = o.sendToFlow(ctx, x, out)
+		return
+	}
+	sf(ctx, send)
+	return true
+}}
+
+// creates an Observable with the provided item(s) producing by the function `func()  (val anytype, end bool)`
+func Start(f interface{}) *Observable {
 	fv := reflect.ValueOf(f)
 	inType := []reflect.Type{}
 	outType := []reflect.Type{typeAny, typeBool}
@@ -40,15 +57,15 @@ func Generator(name string, f interface{}) *Observable {
 		ctx_sup = cb
 	}
 
-	o := newGeneratorObservable(name + "Generator")
+	o := newGeneratorObservable("Start")
 	o.flip_sup_ctx = ctx_sup
 
 	o.flip = fv.Interface()
-	o.operator = customSource
+	o.operator = startSource
 	return o
 }
 
-var customSource = sourceOperater{func(ctx context.Context, o *Observable, out chan interface{}) (end bool) {
+var startSource = sourceOperater{func(ctx context.Context, o *Observable, out chan interface{}) (end bool) {
 	fv := reflect.ValueOf(o.flip)
 	params := []reflect.Value{}
 	if o.flip_sup_ctx {
@@ -80,11 +97,6 @@ var customSource = sourceOperater{func(ctx context.Context, o *Observable, out c
 
 	return true
 }}
-
-// Generator creates an Observable with the provided item(s) producing by the function `func()  (val anytype, end bool)`
-func Start(f interface{}) *Observable {
-	return Generator("Start", f)
-}
 
 // Range creates an Observable that emits a particular range of sequential integers.
 func Range(start, end int) *Observable {
@@ -210,18 +222,16 @@ func From(items interface{}) *Observable {
 // create an Observable that emits no items and does not terminate.
 // It is important for combining with other Observables
 func Never() *Observable {
-	o := newGeneratorObservable("Never")
-
-	o.flip = func(ctx context.Context, out chan interface{}) {
+	source := func(ctx context.Context, send func(x interface{}) (endSignal bool)) {
 		select {
 		case <-ctx.Done():
 		}
 	}
-	o.operator = neverSource
+	o := Generator(source)
+	o.name = "Never"
 	return o
 }
 
-var neverSource = rangeSource
 var emptySource = rangeSource
 var throwSource = rangeSource
 

@@ -44,7 +44,7 @@ func TestRangeWithCancel(t *testing.T) {
 	//fmt.Println(res)
 }
 
-func TestGenerator(t *testing.T) {
+func TestStart(t *testing.T) {
 	// generator function func() (x anytype, end bool)
 	rangex := func(start, end int64) func(ctx context.Context) (int64, bool) {
 		i := start - 1
@@ -66,7 +66,22 @@ func TestGenerator(t *testing.T) {
 			res = append(res, x)
 		})
 	//fmt.Println(res)
-	assert.Equal(t, []int64{1, 2, 4}, res, "Generator Test Error!")
+	assert.Equal(t, []int64{1, 2, 4}, res, "Start Test Error!")
+}
+
+func TestAnySouce(t *testing.T) {
+	res := []int{}
+	source := func(ctx context.Context, send func(x interface{}) (endSignal bool)) {
+		send(10)
+		send(20)
+		send(30)
+	}
+	rxgo.Generator(source).Subscribe(
+		func(x int) {
+			res = append(res, x)
+		})
+
+	assert.Equal(t, []int{10, 20, 30}, res, "Any Test Error!")
 }
 
 func TestJust(t *testing.T) {

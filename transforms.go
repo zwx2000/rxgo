@@ -107,25 +107,6 @@ func userFuncCall(fv reflect.Value, params []reflect.Value) (res []reflect.Value
 	return
 }
 
-// Map maps each item in Observable by the function with `func(x anytype) anytype` and
-// returns a new Observable with applied items.
-func (parent *Observable) Map(f interface{}) (o *Observable) {
-	// check validation of f
-	fv := reflect.ValueOf(f)
-	inType := []reflect.Type{typeAny}
-	outType := []reflect.Type{typeAny}
-	b, ctx_sup := checkFuncUpcast(fv, inType, outType, true)
-	if !b {
-		panic(ErrFuncFlip)
-	}
-
-	o = parent.newTransformObservable("map")
-	o.flip_sup_ctx = ctx_sup
-	o.flip = fv.Interface()
-	o.operator = mapOperater
-	return o
-}
-
 type transOperater struct {
 	opFunc func(ctx context.Context, o *Observable, item reflect.Value, out chan interface{}) (end bool)
 }
@@ -174,6 +155,44 @@ func (tsop transOperater) op(ctx context.Context, o *Observable) {
 		wg.Wait() //waiting all go-routines completed
 		o.closeFlow(out)
 	}()
+}
+
+func (parent *Observable) TransformOp(tf transformFunc) (o *Observable) {
+	o = parent.newTransformObservable("customTransform")
+
+	o.flip = tf
+	o.flip_accept_error = true
+	o.operator = transformOperater
+	return o
+}
+
+var transformOperater = transOperater{func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
+	tf := o.flip.(transformFunc)
+	send := func(x interface{}) (endSignal bool) {
+		endSignal = o.sendToFlow(ctx, x, out)
+		return
+	}
+	tf(ctx, x.Interface(), send)
+	return
+}}
+
+// Map maps each item in Observable by the function with `func(x anytype) anytype` and
+// returns a new Observable with applied items.
+func (parent *Observable) Map(f interface{}) (o *Observable) {
+	// check validation of f
+	fv := reflect.ValueOf(f)
+	inType := []reflect.Type{typeAny}
+	outType := []reflect.Type{typeAny}
+	b, ctx_sup := checkFuncUpcast(fv, inType, outType, true)
+	if !b {
+		panic(ErrFuncFlip)
+	}
+
+	o = parent.newTransformObservable("map")
+	o.flip_sup_ctx = ctx_sup
+	o.flip = fv.Interface()
+	o.operator = mapOperater
+	return o
 }
 
 var mapOperater = transOperater{func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {

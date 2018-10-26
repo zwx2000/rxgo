@@ -42,9 +42,6 @@ func (e FlowableError) Error() string {
 	return e.Err.Error()
 }
 
-// default buffer of channels
-var BufferLen uint = 128
-
 // Observer subscribes to an Observable. Then that observer reacts to whatever item or sequence of items the Observable emits.
 type Observer interface {
 	OnNext(x interface{})
@@ -111,11 +108,14 @@ type streamOperator interface {
 	op(ctx context.Context, o *Observable)
 }
 
-type operatorFunc func(context.Context, *Observable)
+//emit any
+type sourceFunc func(ctx context.Context, send func(x interface{}) (endSignal bool))
 
-func (f operatorFunc) op(ctx context.Context, o *Observable) {
-	f(ctx, o)
-}
+//transform any item
+type transformFunc func(ctx context.Context, item interface{}, send func(x interface{}) (endSignal bool))
+
+// default buffer of channels
+var BufferLen uint = 128
 
 // An Observable is a 'collection of items that arrive over time'. Observables can be used to model asynchronous events.
 // Observables can also be chained by operators to transformed, combined those items

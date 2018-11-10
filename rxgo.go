@@ -21,7 +21,7 @@ const (
 )
 
 // Subscribe paeameter error
-var ErrFuncOnNext = errors.New("Subscribe paramteter needs func(x,anytype) or Observer or ObserverWithContext")
+var ErrFuncOnNext = errors.New("Subscribe paramteter needs func(x anytype) or Observer or ObserverWithContext")
 
 // operator func error
 var ErrFuncFlip = errors.New("Operator Func Error")
@@ -108,7 +108,7 @@ type streamOperator interface {
 	op(ctx context.Context, o *Observable)
 }
 
-//emit any
+//emit something
 type sourceFunc func(ctx context.Context, send func(x interface{}) (endSignal bool))
 
 //transform any item
@@ -121,8 +121,8 @@ var BufferLen uint = 128
 // Observables can also be chained by operators to transformed, combined those items
 // The Observable's operators, by default, run with a channel size of 128 elements except that the source (first) observable has no buffer
 type Observable struct {
-	name string
-	mu   sync.Mutex // lock all when subscribe
+	Name string
+	mu   sync.Mutex // lock all when creating subscriber
 	//
 	flip     interface{} // transformation function
 	outflow  chan interface{}
@@ -147,16 +147,10 @@ func newObservable() *Observable {
 // connect all Observable form the first one.
 func (o *Observable) connect(ctx context.Context) {
 	for po := o.root; po != nil; po = po.next {
-		po.Hot(ctx)
+		po.outflow = make(chan interface{}, po.buf_len)
+		po.operator.op(ctx, po)
+		//fmt.Println("conneted", po.name, po.outflow)
 	}
-}
-
-// connect one Observable
-func (o *Observable) Hot(ctx context.Context) *Observable {
-	o.outflow = make(chan interface{}, o.buf_len)
-	o.operator.op(ctx, o)
-	//fmt.Println("conneted", o.name, o.outflow)
-	return o
 }
 
 func (o *Observable) SubscribeOn(t ThreadModel) *Observable {
@@ -249,7 +243,7 @@ func (o *Observable) SetMonitor(observer Observer) *Observable {
 // set a innerMonitor for debug
 func (o *Observable) Debug(debug bool) *Observable {
 	if debug && o.debug == nil {
-		o.debug = InnerObserver{o.name + " debug "}
+		o.debug = InnerObserver{o.Name + " debug "}
 	}
 	if !debug && o.debug != nil {
 		o.debug = nil

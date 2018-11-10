@@ -49,7 +49,7 @@ func TestObserver(t *testing.T) {
 	rxgo.Just(1, 2, 3).Subscribe(s)
 }
 
-func TestFlatMap(t *testing.T) {
+func TestTreading(t *testing.T) {
 	flow := rxgo.Just(10, 20, 30).Map(func(x int) int {
 		return x + 1
 	})

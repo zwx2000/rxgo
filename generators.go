@@ -9,6 +9,7 @@ import (
 	"reflect"
 )
 
+// source node implementation of streamOperator
 type sourceOperater struct {
 	opFunc func(ctx context.Context, o *Observable, out chan interface{}) (end bool)
 }
@@ -228,7 +229,7 @@ func Never() *Observable {
 		}
 	}
 	o := Generator(source)
-	o.name = "Never"
+	o.Name = "Never"
 	return o
 }
 
@@ -260,7 +261,7 @@ func Throw(e error) *Observable {
 func newGeneratorObservable(name string) (o *Observable) {
 	//new Observable
 	o = newObservable()
-	o.name = name
+	o.Name = name
 
 	//chain Observables
 	o.root = o

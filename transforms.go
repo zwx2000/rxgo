@@ -13,100 +13,12 @@ import (
 var (
 	typeAny        = reflect.TypeOf((*interface{})(nil)).Elem()
 	typeContext    = reflect.TypeOf((*context.Context)(nil)).Elem()
+	typeError      = reflect.TypeOf((*error)(nil)).Elem()
 	typeBool       = reflect.TypeOf(true)
 	typeObservable = reflect.TypeOf(&Observable{})
 )
 
-// func type check, such as `func(x int) bool` satisfy `func(x anytype) bool`
-func checkFuncUpcast(fv reflect.Value, inType, outType []reflect.Type, ctx_sup bool) (b, ctx_b bool) {
-	//fmt.Println(fv.Kind(),reflect.Func)
-	if fv.Kind() != reflect.Func {
-		return // Not func
-	}
-	ft := fv.Type()
-	if ft.NumOut() != len(outType) {
-		return // Error result parameters
-	}
-	if !ctx_sup {
-		if ft.NumIn() != len(inType) {
-			return
-		}
-	} else {
-		if ft.NumIn() == 0 {
-			if len(inType) != 0 {
-				return
-			}
-		} else {
-			if ft.In(0).Implements(typeContext) {
-				ctx_b = true
-				if ft.NumIn() != len(inType)+1 {
-					return
-				}
-			} else {
-				if ft.NumIn() != len(inType) {
-					return
-				}
-			}
-		}
-	}
-
-	for i, t := range inType {
-		var real_t reflect.Type
-		if ctx_b {
-			real_t = ft.In(i + 1)
-		} else {
-			real_t = ft.In(i)
-		}
-
-		//todo: ptr or slice check
-		switch {
-		case real_t == t:
-		case t.Kind() == reflect.Interface && real_t.Implements(t):
-		//case ft.In(i).AssignableTo(t):
-		//case ft.In(i).ConvertibleTo(t):
-		default:
-			return
-		}
-	}
-	for i, t := range outType {
-		//fmt.Println(ft.Out(i), t)
-		//todo: ptr or slice check
-		switch {
-		case ft.Out(i) == t:
-		case t.Kind() == reflect.Interface && ft.Out(i).Implements(t):
-		default:
-			return
-		}
-	}
-	b = true
-	return
-}
-
-// wrap exception when call user function
-func userFuncCall(fv reflect.Value, params []reflect.Value) (res []reflect.Value, skip, stop bool, eout error) {
-	defer func() {
-		if e := recover(); e != nil {
-			if fe, ok := e.(FlowableError); ok {
-				eout = fe
-				return
-			}
-			switch e {
-			case ErrSkipItem:
-				skip = true
-				return
-			case ErrEoFlow:
-				stop = true
-				return
-			default:
-				panic(e)
-			}
-		}
-	}()
-
-	res = fv.Call(params)
-	return
-}
-
+// transform node implementation of streamOperator
 type transOperater struct {
 	opFunc func(ctx context.Context, o *Observable, item reflect.Value, out chan interface{}) (end bool)
 }
@@ -159,6 +71,7 @@ func (tsop transOperater) op(ctx context.Context, o *Observable) {
 
 func (parent *Observable) TransformOp(tf transformFunc) (o *Observable) {
 	o = parent.newTransformObservable("customTransform")
+	o.flip_accept_error = true
 
 	o.flip = tf
 	o.flip_accept_error = true
@@ -189,6 +102,8 @@ func (parent *Observable) Map(f interface{}) (o *Observable) {
 	}
 
 	o = parent.newTransformObservable("map")
+	o.flip_accept_error = checkFuncAcceptError(fv)
+
 	o.flip_sup_ctx = ctx_sup
 	o.flip = fv.Interface()
 	o.operator = mapOperater
@@ -233,6 +148,8 @@ func (parent *Observable) FlatMap(f interface{}) (o *Observable) {
 	}
 
 	o = parent.newTransformObservable("flatMap")
+	o.flip_accept_error = checkFuncAcceptError(fv)
+
 	o.flip_sup_ctx = ctx_sup
 	o.flip = fv.Interface()
 	o.operator = flatMapOperater
@@ -296,6 +213,8 @@ func (parent *Observable) Filter(f interface{}) (o *Observable) {
 	}
 
 	o = parent.newTransformObservable("filter")
+	o.flip_accept_error = checkFuncAcceptError(fv)
+
 	o.flip_sup_ctx = ctx_sup
 	o.flip = fv.Interface()
 	o.operator = filterOperater
@@ -332,7 +251,7 @@ var filterOperater = transOperater{func(ctx context.Context, o *Observable, x re
 func (parent *Observable) newTransformObservable(name string) (o *Observable) {
 	//new Observable
 	o = newObservable()
-	o.name = name
+	o.Name = name
 
 	//chain Observables
 	parent.next = o

@@ -1,4 +1,4 @@
-package myrxgo
+package rxgo
 
 import (
 	"context"

@@ -8,29 +8,69 @@ import (
 	"time"
 )
 
-// 过滤数据
+var (
+	NoInput = errors.New("There are no input stream !")
+	OutOfBound = errors.New("Out of the bound !")
+)
+
 type filterOperator struct {
 	opFunc func(ctx context.Context, o *Observable, item reflect.Value, out chan interface{}) (end bool)
 }
 
-// 自定义错误
-var NoInput = errors.New("No Input!")        // 没有输入
-var OutOfBound = errors.New("Out Of Bound!") // 出界
-
-// 初始化一个过滤Observable
 func (parent *Observable) newFilterObservable(name string) (o *Observable) {
-	//new Observable
 	o = newObservable()
 	o.Name = name
 
-	//chain Observables
 	parent.next = o
 	o.pred = parent
 	o.root = parent.root
 
-	//set options
 	o.buf_len = BufferLen
 	return
+}
+
+// 只发射第一项（或者满足某个条件的第一项）数据
+func (parent *Observable) First() (o *Observable) {
+	o = parent.newFilterObservable("first")
+	o.first, o.last, o.distinct = true, false, false
+	o.debounce = 0
+	o.take = 0
+	o.skip = 0
+	o.operator = firstOperator
+	return o
+}
+
+var firstOperator = filterOperator{func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
+	var params = []reflect.Value{x}
+	x = params[0]
+
+	if !end {
+		end = o.sendToFlow(ctx, x.Interface(), out)
+	}
+	return
+},
+}
+
+// 只发射最后一项（或者满足某个条件的最后一项）数据
+func (parent *Observable) Last() (o *Observable) {
+	o = parent.newFilterObservable("last")
+	o.first, o.last, o.distinct = false, true, false
+	o.debounce = 0
+	o.take = 0
+	o.skip = 0
+	o.operator = lastOperator
+	return o
+}
+
+var lastOperator = filterOperator{func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
+	var params = []reflect.Value{x}
+	x = params[0]
+
+	if !end {
+		end = o.sendToFlow(ctx, x.Interface(), out)
+	}
+	return
+},
 }
 
 // 仅在过了一段指定的时间还没发射数据时才发射一个数据
@@ -46,7 +86,6 @@ var debounceOperator = filterOperator{opFunc: func(ctx context.Context, o *Obser
 	var params = []reflect.Value{x}
 	x = params[0]
 
-	// send data
 	if !end {
 		end = o.sendToFlow(ctx, x.Interface(), out)
 	}
@@ -67,71 +106,6 @@ var distinctOperator = filterOperator{opFunc: func(ctx context.Context, o *Obser
 	var params = []reflect.Value{x}
 	x = params[0]
 
-	// send data
-	if !end {
-		end = o.sendToFlow(ctx, x.Interface(), out)
-	}
-	return
-},
-}
-
-// 只发射第N项数据
-func (parent *Observable) ElementAt(index int) (o *Observable) {
-	o = parent.newFilterObservable("elementAt")
-	o.first, o.last, o.distinct, o.takeOrLast = false, false, false, false
-	o.debounce, o.skip, o.take, o.elementAt = 0, 0, 0, index
-	o.operator = elementAtOperator
-	return
-}
-
-var elementAtOperator = filterOperator{opFunc: func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
-	var params = []reflect.Value{x}
-	x = params[0]
-
-	// send data
-	if !end {
-		end = o.sendToFlow(ctx, x.Interface(), out)
-	}
-	return
-},
-}
-
-// 只发射第一项（或者满足某个条件的第一项）数据
-func (parent *Observable) First() (o *Observable) {
-	o = parent.newFilterObservable("first")
-	o.first, o.last, o.distinct = true, false, false
-	o.debounce, o.take, o.skip = 0, 0, 0
-	o.operator = firstOperator
-	return o
-
-}
-
-var firstOperator = filterOperator{func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
-	var params = []reflect.Value{x}
-	x = params[0]
-
-	// send data
-	if !end {
-		end = o.sendToFlow(ctx, x.Interface(), out)
-	}
-	return
-},
-}
-
-// 只发射最后一项（或者满足某个条件的最后一项）数据
-func (parent *Observable) Last() (o *Observable) {
-	o = parent.newFilterObservable("last")
-	o.first, o.last, o.distinct = false, true, false
-	o.debounce, o.take, o.skip = 0, 0, 0
-	o.operator = lastOperator
-	return o
-}
-
-var lastOperator = filterOperator{func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
-	var params = []reflect.Value{x}
-	x = params[0]
-
-	// send data
 	if !end {
 		end = o.sendToFlow(ctx, x.Interface(), out)
 	}
@@ -152,7 +126,6 @@ var sampleOperator = filterOperator{opFunc: func(ctx context.Context, o *Observa
 	var params = []reflect.Value{x}
 	x = params[0]
 
-	// send data
 	if !end {
 		end = o.sendToFlow(ctx, x.Interface(), out)
 	}
@@ -173,7 +146,29 @@ var skipOperator = filterOperator{opFunc: func(ctx context.Context, o *Observabl
 	var params = []reflect.Value{x}
 	x = params[0]
 
-	// send data
+	if !end {
+		end = o.sendToFlow(ctx, x.Interface(), out)
+	}
+	return
+},
+}
+
+// 只发射第N项数据
+func (parent *Observable) ElementAt(index int) (o *Observable) {
+	o = parent.newFilterObservable("elementAt")
+	o.first, o.last, o.distinct, o.takeOrLast = false, false, false, false
+	o.debounce = 0
+	o.skip = 0
+	o.take = 0
+	o.elementAt = index
+	o.operator = elementAtOperator
+	return
+}
+
+var elementAtOperator = filterOperator{opFunc: func(ctx context.Context, o *Observable, x reflect.Value, out chan interface{}) (end bool) {
+	var params = []reflect.Value{x}
+	x = params[0]
+
 	if !end {
 		end = o.sendToFlow(ctx, x.Interface(), out)
 	}
@@ -194,7 +189,6 @@ var skipLastOperator = filterOperator{opFunc: func(ctx context.Context, o *Obser
 	var params = []reflect.Value{x}
 	x = params[0]
 
-	// send data
 	if !end {
 		end = o.sendToFlow(ctx, x.Interface(), out)
 	}
@@ -215,7 +209,6 @@ var takeOperator = filterOperator{opFunc: func(ctx context.Context, o *Observabl
 	var params = []reflect.Value{x}
 	x = params[0]
 
-	// send data
 	if !end {
 		end = o.sendToFlow(ctx, x.Interface(), out)
 	}
@@ -236,7 +229,6 @@ var takeLastOperator = filterOperator{opFunc: func(ctx context.Context, o *Obser
 	var params = []reflect.Value{x}
 	x = params[0]
 
-	// send data
 	if !end {
 		end = o.sendToFlow(ctx, x.Interface(), out)
 	}
@@ -269,14 +261,11 @@ func takeOrSkip(_op bool, div int, in []interface{}) ([]interface{}, error) {
 }
 
 func (tsop filterOperator) op(ctx context.Context, o *Observable) {
-	// must hold defintion of flow resourcs here, such as chan etc., that is allocated when connected
-	// this resurces may be changed when operation routine is running.
 	in := o.pred.outflow
 	out := o.outflow
-	//fmt.Println(o.name, "operator in/out chan ", in, out)
 	var wg sync.WaitGroup
 
-	// 设置一个时间间隔
+	// 设置时间间隔
 	tspan := o.debounce
 	var _out []interface{}
 
@@ -304,9 +293,7 @@ func (tsop filterOperator) op(ctx context.Context, o *Observable) {
 			if tspan > time.Duration(0) && _start < tspan {
 				continue
 			}
-			// can not pass a interface as parameter (pointer) to gorountion for it may change its value outside!
 			xv := reflect.ValueOf(x)
-			// send an error to stream if the flip not accept error
 			if e, ok := x.(error); ok && !o.flip_accept_error {
 				o.sendToFlow(ctx, e, out)
 				continue
@@ -335,7 +322,6 @@ func (tsop filterOperator) op(ctx context.Context, o *Observable) {
 			flag[xv.Interface()] = true
 			o.mu.Unlock()
 
-			// scheduler
 			switch threading := o.threading; threading {
 			case ThreadingDefault:
 				if o.sample > 0 {
@@ -405,7 +391,7 @@ func (tsop filterOperator) op(ctx context.Context, o *Observable) {
 			}
 		}
 
-		wg.Wait() //waiting all go-routines completed
+		wg.Wait()
 		if (o.last || o.first) && len(_out) == 0 && !o.flip_accept_error {
 			o.sendToFlow(ctx, NoInput, out)
 		}

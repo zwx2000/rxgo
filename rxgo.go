@@ -139,15 +139,15 @@ type Observable struct {
 	debug             Observer
 	flip_sup_ctx      bool //indicate that flip function use context as first paramter
 	flip_accept_error bool // indicate that flip function input's data is type interface{} or error
-	debounce   time.Duration // n秒后发射一个数据
-	distinct   bool          // 是否只选择不同的值
-	elementAt  int           // 选择指定的索引的元素
-	first      bool          // 是否选择第一数据
-	last       bool          // 是否选择最后一个数据
-	sample     time.Duration // 发射自上次采样以来它最近发射的数据
-	skip       int           // 正值跳过前几项，负值跳过后几项
-	take       int           // 正值选择前几项，负值选择后几项
-	takeOrLast bool          // 判断是哪种take操作
+	debounce   time.Duration // 过滤发射速率过快的数据项
+	distinct   bool          // 抑制（过滤掉）重复的数据项
+	elementAt  int           // 只发射第N项数据
+	first      bool          // 只发射第一项（或者满足某个条件的第一项）数据
+	last       bool          // 只发射最后一项（或者满足某个条件的最后一项数据）
+	sample     time.Duration // 定期发射Observable最近发射的数据项
+	skip       int           // 抑制Observable发射的前N项数据
+	take       int           // 只发射前面的N项数据
+	takeOrLast bool          // 判断是take还是takeLast
 }
 
 func newObservable() *Observable {

@@ -39,7 +39,7 @@ func TestElementAt(t *testing.T) {
 	ob.Subscribe(func(x int) {
 		res = append(res, x)
 	})
-	assert.Equal(t, []int{40}, res, "SkipLast Test Error!")
+	assert.Equal(t, []int{4}, res, "SkipLast Test Error!")
 }
 
 func TestFirst(t *testing.T) {
@@ -51,7 +51,7 @@ func TestFirst(t *testing.T) {
 		res = append(res, x)
 	})
 
-	assert.Equal(t, []int{10}, res, "First Test Error!")
+	assert.Equal(t, []int{1}, res, "First Test Error!")
 }
 
 func TestLast(t *testing.T) {
@@ -63,7 +63,7 @@ func TestLast(t *testing.T) {
 		res = append(res, x)
 	})
 
-	assert.Equal(t, []int{50}, res, "Last Test Error!")
+	assert.Equal(t, []int{5}, res, "Last Test Error!")
 }
 
 func TestSample(t *testing.T) {
@@ -74,7 +74,7 @@ func TestSample(t *testing.T) {
 	}).Sample(3 * time.Millisecond).Subscribe(func(x int) {
 		res = append(res, x)
 	})
-	assert.Equal(t, []int{2, 3, 4, 5}, res, "SkipLast Test Error!")
+	assert.Equal(t, []int{2, 3, 5}, res, "SkipLast Test Error!")
 
 }
 
@@ -86,7 +86,7 @@ func TestSkip(t *testing.T) {
 	ob.Subscribe(func(x int) {
 		res = append(res, x)
 	})
-	assert.Equal(t, []int{50}, res, "Skip Test Error!")
+	assert.Equal(t, []int{5}, res, "Skip Test Error!")
 }
 
 func TestSkipLast(t *testing.T) {
@@ -97,7 +97,7 @@ func TestSkipLast(t *testing.T) {
 	ob.Subscribe(func(x int) {
 		res = append(res, x)
 	})
-	assert.Equal(t, []int{10}, res, "SkipLast Test Error!")
+	assert.Equal(t, []int{1}, res, "SkipLast Test Error!")
 }
 
 func TestTake(t *testing.T) {
